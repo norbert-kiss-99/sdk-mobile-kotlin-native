@@ -1,5 +1,8 @@
 package com.strivacity.android.app
 
+import android.content.Context
+import android.util.Log
+import android.widget.Toast
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,6 +40,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.semantics
@@ -48,12 +53,22 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.window.Popup
+import androidx.credentials.CreatePublicKeyCredentialRequest
+import androidx.credentials.CreatePublicKeyCredentialResponse
+import androidx.credentials.CredentialManager
+import androidx.credentials.exceptions.CreateCredentialCancellationException
+import androidx.credentials.exceptions.CreateCredentialCustomException
+import androidx.credentials.exceptions.CreateCredentialException
+import androidx.credentials.exceptions.CreateCredentialInterruptedException
+import androidx.credentials.exceptions.CreateCredentialProviderConfigurationException
+import androidx.credentials.exceptions.publickeycredential.CreatePublicKeyCredentialDomException
 import com.strivacity.android.native_sdk.render.LoginController
 import com.strivacity.android.native_sdk.render.models.CheckboxWidget
 import com.strivacity.android.native_sdk.render.models.DateWidget
 import com.strivacity.android.native_sdk.render.models.InputWidget
 import com.strivacity.android.native_sdk.render.models.MultiSelectWidget
 import com.strivacity.android.native_sdk.render.models.PasscodeWidget
+import com.strivacity.android.native_sdk.render.models.PasskeyLoginWidget
 import com.strivacity.android.native_sdk.render.models.PasswordWidget
 import com.strivacity.android.native_sdk.render.models.PhoneWidget
 import com.strivacity.android.native_sdk.render.models.Screen
@@ -68,6 +83,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 
 @Composable
 fun Widget(
@@ -88,6 +104,7 @@ fun Widget(
     is SelectWidget -> SelectWidget(loginController, screen, widget, formId, widgetId)
     is StaticWidget -> StaticWidget(loginController, screen, widget, formId, widgetId)
     is SubmitWidget -> SubmitWidget(loginController, screen, widget, formId, widgetId)
+    is PasskeyLoginWidget -> PasskeyLoginWidget(loginController, screen, widget, formId, widgetId)
     else -> loginController.triggerFallback()
   }
 
@@ -577,4 +594,98 @@ fun TextWithType(loginController: LoginController, type: String?, value: String)
 
     else -> loginController.triggerFallback()
   }
+}
+
+@Composable
+fun PasskeyLoginWidget(
+    loginController: LoginController,
+    screen: Screen,
+    widget: PasskeyLoginWidget,
+    formId: String,
+    widgetId: String
+) {
+    val coroutineScope = rememberCoroutineScope()
+
+    val processing by loginController.processing.collectAsState()
+
+    val context = LocalContext.current
+
+    val credentialManager by remember { mutableStateOf(CredentialManager.create(context)) }
+
+    val tag = "PasskeyLoginWidget"
+
+    val onClick: () -> Unit = { coroutineScope.launch {
+        try {
+            val request = CreatePublicKeyCredentialRequest(
+                Json.encodeToString(widget.assertionOptions)
+            )
+
+            val response = credentialManager.createCredential(context = context, request = request) as CreatePublicKeyCredentialResponse
+
+            val responseObject = Json.decodeFromString<Any>(response.registrationResponseJson)
+        } catch (e: CreateCredentialException) {
+            handleCreateCredentialException(e, context, tag)
+        } catch (e: Exception) {
+            Log.w(tag, "Unexpected exception: ${e.message}")
+
+            Toast.makeText(
+                context,
+                "Unexpected error occurred, please try again (105).",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+
+        loginController.stateForWidget(formId, widgetId, "")
+        loginController.submit(formId)
+    } }
+    when (widget.render?.type) {
+        "button" -> Button(onClick = onClick, enabled = !processing) { Text(widget.label) }
+        else -> loginController.triggerFallback()
+    }
+}
+
+fun handleCreateCredentialException(e: CreateCredentialException, context: Context, tag: String) {
+    when (e) {
+        is CreatePublicKeyCredentialDomException -> {
+            Log.w(tag, "DOM Exception with type: ${e.type}")
+            Toast.makeText(
+                context,
+                "Unexpected error occurred, please try again (101).",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+
+        is CreateCredentialCancellationException -> {
+            Log.d(tag, "User cancelled")
+        }
+
+        is CreateCredentialInterruptedException -> {
+            Log.w(tag, "Operation interrupted")
+            Toast.makeText(
+                context,
+                "Unexpected error occurred, please try again (102).",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+
+        is CreateCredentialProviderConfigurationException -> {
+            Log.w(tag, "Provider misconfigured: ${e.message}")
+            Toast.makeText(
+                context,
+                "Unexpected error occurred, please try again (103).",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+
+        is CreateCredentialCustomException -> {
+            Log.w(tag, "Custom exception: ${e.message}")
+            Toast.makeText(
+                context,
+                "Unexpected error occurred, please try again (104).",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+
+        else -> Log.w(tag, "Unexpected exception type ${e::class.java.name}")
+    }
 }
