@@ -68,6 +68,7 @@ import com.strivacity.android.native_sdk.render.models.DateWidget
 import com.strivacity.android.native_sdk.render.models.InputWidget
 import com.strivacity.android.native_sdk.render.models.MultiSelectWidget
 import com.strivacity.android.native_sdk.render.models.PasscodeWidget
+import com.strivacity.android.native_sdk.render.models.PasskeyEnrollWidget
 import com.strivacity.android.native_sdk.render.models.PasskeyLoginWidget
 import com.strivacity.android.native_sdk.render.models.PasswordWidget
 import com.strivacity.android.native_sdk.render.models.PhoneWidget
@@ -104,6 +105,7 @@ fun Widget(
     is SelectWidget -> SelectWidget(loginController, screen, widget, formId, widgetId)
     is StaticWidget -> StaticWidget(loginController, screen, widget, formId, widgetId)
     is SubmitWidget -> SubmitWidget(loginController, screen, widget, formId, widgetId)
+    is PasskeyEnrollWidget -> PasskeyEnrollWidget(loginController, screen, widget, formId, widgetId)
     is PasskeyLoginWidget -> PasskeyLoginWidget(loginController, screen, widget, formId, widgetId)
     else -> loginController.triggerFallback()
   }
@@ -594,6 +596,54 @@ fun TextWithType(loginController: LoginController, type: String?, value: String)
 
     else -> loginController.triggerFallback()
   }
+}
+
+@Composable
+fun PasskeyEnrollWidget(
+    loginController: LoginController,
+    screen: Screen,
+    widget: PasskeyEnrollWidget,
+    formId: String,
+    widgetId: String
+) {
+    val coroutineScope = rememberCoroutineScope()
+
+    val processing by loginController.processing.collectAsState()
+
+    val context = LocalContext.current
+
+    val credentialManager by remember { mutableStateOf(CredentialManager.create(context)) }
+
+    val tag = "PasskeyEnrollWidget"
+
+    val onClick: () -> Unit = { coroutineScope.launch {
+        try {
+            val request = CreatePublicKeyCredentialRequest(
+                Json.encodeToString(widget.enrollOptions)
+            )
+
+            val response = credentialManager.createCredential(context = context, request = request) as CreatePublicKeyCredentialResponse
+
+            val responseObject = Json.decodeFromString<Any>(response.registrationResponseJson)
+        } catch (e: CreateCredentialException) {
+            handleCreateCredentialException(e, context, tag)
+        } catch (e: Exception) {
+            Log.w(tag, "Unexpected exception: ${e.message}")
+
+            Toast.makeText(
+                context,
+                "Unexpected error occurred, please try again (105).",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+
+        loginController.stateForWidget(formId, widgetId, "")
+        loginController.submit(formId)
+    } }
+    when (widget.render?.type) {
+        "button" -> Button(onClick = onClick, enabled = !processing) { Text(widget.label) }
+        else -> loginController.triggerFallback()
+    }
 }
 
 @Composable
